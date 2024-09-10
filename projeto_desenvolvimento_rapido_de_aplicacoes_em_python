@@ -1,0 +1,491 @@
+
+from sqlalchemy import create_engine, MetaData, Table
+from sqlalchemy.orm import sessionmaker
+import tkinter as tk
+import pandas as pd
+from tkinter import ttk, messagebox
+from datetime import date
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from pretty_html_table import build_table
+
+
+#  Eu desenvolvi esse código com ajuda do copilot, para solução de dúvidas e refatoração buscando escrita mais concisa.
+#  Eu transformei cada iteração do projeto em uma classe, para ficar mais fácil de visualizar como ele foi feito e de 
+#  juntá-las no fim.
+
+class DatabaseConnection:
+    def __init__(self, database_url):
+        self.engine = create_engine(database_url)
+        self.metadata = MetaData()
+        self.metadata.reflect(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+        self.session = self.Session()
+
+    def get_table(self, table_name):
+        return Table(table_name, self.metadata, autoload_with=self.engine)
+
+
+class ClienteForm:
+    def __init__(self, root, db_connection):
+        self.db_connection = db_connection
+        self.Cliente = self.db_connection.get_table('dim_cliente')
+
+        self.root = root
+        # self.root.title("Formulário de Cadastro de Cliente")
+
+        self.create_widgets()
+
+    def create_widgets(self):
+        tk.Label(self.root, text="CPF/CNPJ:").grid(row=0, column=0)
+        self.entry_cpf = tk.Entry(self.root)
+        self.entry_cpf.grid(row=0, column=1)
+        self.entry_cpf.bind("<Return>", lambda event: self.buscar_cliente())
+
+        tk.Button(self.root, text="Cadastrar Cliente", command=self.cadastrar_cliente).grid(row=5, column=2)
+        tk.Button(self.root, text="Editar Cliente", command=self.editar_cliente).grid(row=5, column=3)
+
+        tk.Label(self.root, text="Inscrição Estadual:").grid(row=1, column=0)
+        self.entry_inscricao_est = tk.Entry(self.root)
+        self.entry_inscricao_est.grid(row=1, column=1)
+
+        tk.Label(self.root, text="Cliente:").grid(row=2, column=0)
+        self.entry_nm_cliente = tk.Entry(self.root)
+        self.entry_nm_cliente.grid(row=2, column=1)
+
+        tk.Label(self.root, text="Email:").grid(row=3, column=0)
+        self.entry_email = tk.Entry(self.root)
+        self.entry_email.grid(row=3, column=1)
+
+        tk.Label(self.root, text="Telefone:").grid(row=4, column=0)
+        self.entry_telefone = tk.Entry(self.root)
+        self.entry_telefone.grid(row=4, column=1)
+
+        tk.Label(self.root, text="CEP:").grid(row=0, column=3)
+        self.entry_cep = tk.Entry(self.root)
+        self.entry_cep.grid(row=0, column=4)
+
+        tk.Label(self.root, text="Endereço:").grid(row=1, column=3)
+        self.entry_endereco = tk.Entry(self.root)
+        self.entry_endereco.grid(row=1, column=4)
+
+        tk.Label(self.root, text="Bairro:").grid(row=2, column=3)
+        self.entry_bairro = tk.Entry(self.root)
+        self.entry_bairro.grid(row=2, column=4)
+
+        tk.Label(self.root, text="Município:").grid(row=3, column=3)
+        self.entry_municipio = tk.Entry(self.root)
+        self.entry_municipio.grid(row=3, column=4)
+
+        tk.Label(self.root, text="Estado:").grid(row=4, column=3)
+        self.entry_estado = tk.Entry(self.root)
+        self.entry_estado.grid(row=4, column=4)
+
+    def buscar_cliente(self, event=None):
+        cpf = self.entry_cpf.get()
+
+        if not cpf:
+            messagebox.showerror("Erro", "O campo CPF/CNPJ não pode estar vazio.")
+            return
+
+        cliente = self.db_connection.session.query(self.Cliente).filter_by(cpf_cnpj=cpf).first()
+        if cliente:
+            campos = {
+                'inscricao_est': cliente.inscricao_est,
+                'nm_cliente': cliente.nm_cliente,
+                'email': cliente.email,
+                'telefone': cliente.telefone,
+                'cep': cliente.cep,
+                'endereco': cliente.endereco,
+                'bairro': cliente.bairro,
+                'municipio': cliente.municipio,
+                'estado': cliente.estado
+            }
+
+            for campo, valor in campos.items():
+                entrada = getattr(self, f'entry_{campo}')
+                entrada.config(state='normal')
+                entrada.delete(0, tk.END)
+                entrada.insert(0, valor)
+                entrada.config(state='readonly')
+        else:
+            messagebox.showerror("Erro", "Cliente não encontrado, cadastre seus dados.")
+
+    def cadastrar_cliente(self):
+        cpf = self.entry_cpf.get()
+        inscricao_est = self.entry_inscricao_est.get()
+        nm_cliente = self.entry_nm_cliente.get()
+        email = self.entry_email.get()
+        telefone = self.entry_telefone.get()
+        cep = self.entry_cep.get()
+        endereco = self.entry_endereco.get()
+        bairro = self.entry_bairro.get()
+        municipio = self.entry_municipio.get()
+        estado = self.entry_estado.get()
+
+        if not all([cpf, inscricao_est, nm_cliente, email, telefone, cep, endereco, bairro, municipio, estado]):
+            messagebox.showerror("Erro", "Todos os campos devem ser preenchidos.")
+            return
+
+        cliente_existente = self.db_connection.session.query(self.Cliente).filter_by(cpf_cnpj=cpf).first()
+        if cliente_existente:
+            messagebox.showerror("Erro", "Cliente já cadastrado.")
+            return
+
+        novo_cliente = self.Cliente.insert().values(
+            cpf_cnpj=cpf,
+            inscricao_est=inscricao_est,
+            nm_cliente=nm_cliente,
+            email=email,
+            telefone=telefone,
+            cep=cep,
+            endereco=endereco,
+            bairro=bairro,
+            municipio=municipio,
+            estado=estado
+        )
+
+        self.db_connection.session.execute(novo_cliente)
+        self.db_connection.session.commit()
+        messagebox.showinfo("Sucesso", "Cliente cadastrado com sucesso!")
+
+        self.limpar_campos()
+
+    def editar_cliente(self):
+        for campo in ['inscricao_est', 'nm_cliente', 'email', 'telefone', 'cep', 'endereco', 'bairro', 'municipio', 'estado']:
+            entrada = getattr(self, f'entry_{campo}')
+            entrada.config(state='normal')
+        #  Mostra o botão para salvar as alterações
+        tk.Button(self.root, text="Salvar Alterações", command=self.salvar_alteracoes).grid(row=5, column=4)
+
+    def salvar_alteracoes(self):
+        cpf = self.entry_cpf.get()
+        inscricao_est = self.entry_inscricao_est.get()
+        nm_cliente = self.entry_nm_cliente.get()
+        email = self.entry_email.get()
+        telefone = self.entry_telefone.get()
+        cep = self.entry_cep.get()
+        endereco = self.entry_endereco.get()
+        bairro = self.entry_bairro.get()
+        municipio = self.entry_municipio.get()
+        estado = self.entry_estado.get()
+
+        if not all([cpf, inscricao_est, nm_cliente, email, telefone, cep, endereco, bairro, municipio, estado]):
+            messagebox.showerror("Erro", "Todos os campos devem ser preenchidos.")
+            return
+
+        cliente = self.db_connection.session.query(self.Cliente).filter_by(cpf_cnpj=cpf).first()
+        if cliente:
+            self.db_connection.session.query(self.Cliente).filter_by(cpf_cnpj=cpf).update({
+                'inscricao_est': inscricao_est,
+                'nm_cliente': nm_cliente,
+                'email': email,
+                'telefone': telefone,
+                'cep': cep,
+                'endereco': endereco,
+                'bairro': bairro,
+                'municipio': municipio,
+                'estado': estado
+            })
+            self.db_connection.session.commit()
+            messagebox.showinfo("Sucesso", "Dados do cliente atualizados com sucesso!")
+            self.limpar_campos()
+        else:
+            messagebox.showerror("Erro", "Cliente não encontrado.")
+
+    def limpar_campos(self):
+        self.entry_cpf.delete(0, tk.END)
+        self.entry_inscricao_est.delete(0, tk.END)
+        self.entry_nm_cliente.delete(0, tk.END)
+        self.entry_email.delete(0, tk.END)
+        self.entry_telefone.delete(0, tk.END)
+        self.entry_cep.delete(0, tk.END)
+        self.entry_endereco.delete(0, tk.END)
+        self.entry_bairro.delete(0, tk.END)
+        self.entry_municipio.delete(0, tk.END)
+        self.entry_estado.delete(0, tk.END)
+
+
+class PedidoForm:
+    def __init__(self, root, db_connection):
+        self.db_connection = db_connection
+        self.Cliente = self.db_connection.get_table('dim_cliente')
+        self.Produto = self.db_connection.get_table('dim_produto')
+        self.Pedido = self.db_connection.get_table('ft_pedido')
+
+        self.root = root
+        # self.root.title("Formulário de Cadastro de Pedido")
+
+        self.columns = ['referencia', 'cor', '33', '34', '35', '36', '37', '38', '39', '40', 'total_referencia',
+                        'preco', 'vl_total_referencia']
+        self.df_entries = pd.DataFrame(columns=self.columns)
+        self.df_entries.loc[0] = [None] * len(self.columns)  # Inicializa com uma linha vazia
+        self.create_widgets()
+
+    def create_widgets(self):  # cria a estrutura básica da tabela com os nomes das colunas
+        for widget in self.root.winfo_children():
+            widget.destroy()
+
+        for i, column in enumerate(self.columns):
+            label = tk.Label(self.root, text=column, borderwidth=1, relief="groove")
+            label.grid(row=0, column=i, sticky="nsew")
+
+        for row in self.df_entries.index:
+            for j, column in enumerate(self.columns):
+                self.create_entry_widget(row, j, column)
+
+        add_button = tk.Button(self.root, text="Adicionar Linha", command=self.adicionar_linha)
+        add_button.grid(row=len(self.df_entries) + 1, column=0, columnspan=len(self.columns), sticky="nsew")
+
+    def create_entry_widget(self, row, col, column):
+        # cria os widgets de entrada de dados na tabela, pode ser combobox ou entry
+        if column == 'referencia':
+            self.create_combobox(row, col, column, self.obter_valores_unicos(column), self.atualizar_cores)
+        elif column == 'cor':
+            self.create_combobox(row, col, column, [], self.atualizar_preco)
+        elif column in ['preco', 'total_referencia', 'vl_total_referencia']:
+            #  essas 3 colunas não tem o parametro bind_event porque são definidos dinamicamente e não pela entrada do
+            #  usuário
+            self.create_entry(row, col, column)
+        else:
+            self.create_entry(row, col, column, bind_event=True)
+
+    def create_combobox(self, row, col, column, values, event_handler):
+        combobox = ttk.Combobox(self.root, values=values, width=15)
+        combobox.grid(row=row + 1, column=col, sticky="nsew")
+        combobox.set(self.df_entries.at[row, column] if self.df_entries.at[row, column] is not None else "")
+        combobox.bind("<<ComboboxSelected>>", event_handler)
+        # o parametro event_handler permite que cada combobox chame funções diferentes, o de referencia busca as
+        # referencias no BD e atualiza as cores e o de cor atualiza o preço
+
+    def create_entry(self, row, col, column, bind_event=False):
+        entry = tk.Entry(self.root, width=15, borderwidth=1, relief="groove")
+        entry.grid(row=row + 1, column=col, sticky="nsew")
+        entry.insert(0, self.df_entries.at[row, column] if self.df_entries.at[row, column] is not None else "")
+        if bind_event:  # os campos com entrada do usuário atualizam o dataframe sempre que o usuario termina de digitar
+            entry.bind("<KeyRelease>", lambda event, col=column, r=row: self.atualizar_dataframe(event, col, r))
+
+    def obter_valores_unicos(self, coluna, filtro=None):
+        query = self.db_connection.session.query(getattr(self.Produto.columns, coluna)).distinct()
+        if filtro is not None:
+            query = query.filter(filtro)
+        return [v[0] for v in query.all()]
+
+    def obter_preco(self, cd_produto, cor):
+        return self.db_connection.session.query(getattr(self.Produto.columns, 'preco')).filter(
+            getattr(self.Produto.columns, 'referencia') == cd_produto,
+            getattr(self.Produto.columns, 'cor') == cor
+        ).first()
+
+    def atualizar_cores(self, event):
+        referencia = event.widget.get()
+        cores = self.obter_valores_unicos('cor', getattr(self.Produto.columns, 'referencia') == str(referencia))
+        combobox_cor = event.widget.master.grid_slaves(row=event.widget.grid_info()['row'], column=self.columns.index('cor'))[0]
+        combobox_cor['values'] = cores
+        combobox_cor.set('')
+        self.atualizar_dataframe(event, 'referencia', event.widget.grid_info()['row'] - 1)
+        #  O -1 é usado para ajustar a diferença entre a contagem de linhas da interface gráfica (que começa em 1) e a
+        #  contagem de índices do DataFrame (que começa em 0).
+
+    def atualizar_preco(self, event):
+        row = event.widget.grid_info()['row'] - 1
+        referencia = self.df_entries.at[row, 'referencia']
+        cor = event.widget.get()
+        preco = self.obter_preco(referencia, cor)
+        entry_preco = self.root.grid_slaves(row=row + 1, column=self.columns.index('preco'))[0]
+        entry_preco.delete(0, tk.END)
+        entry_preco.insert(0, preco[0] if preco else "")
+        self.atualizar_dataframe(event, 'cor', row)
+        self.atualizar_dataframe(event, 'preco', row, preco[0] if preco else "")
+        self.calcular_totais()
+
+    def adicionar_linha(self):
+        new_index = len(self.df_entries)
+        self.df_entries.loc[new_index] = [""] * len(self.columns)
+        self.create_widgets()
+
+    def atualizar_dataframe(self, event, column, row, value=None):
+        widget = event.widget
+        value = value if value is not None else widget.get()
+        if column in ['preco', 'vl_total_referencia']:
+            value = float(value)
+        self.df_entries.at[row, column] = value
+        self.calcular_totais()
+        atualizar_labels()  # atualiza os totais de pares e do valor do pedido nos labels correspondentes
+
+    def calcular_totais(self):
+        self.df_entries.loc[:, '33':'40'] = self.df_entries.loc[:, '33':'40'].apply(pd.to_numeric, errors='coerce').fillna(0).astype(int)
+        self.df_entries['preco'] = pd.to_numeric(self.df_entries['preco'], errors='coerce').fillna(0.0)
+        self.df_entries['total_referencia'] = self.df_entries.loc[:, '33':'40'].sum(axis=1)
+        self.df_entries['vl_total_referencia'] = self.df_entries['total_referencia'] * self.df_entries['preco']
+        self.update_totals_in_entries()  # atualiza os totais em cada linha
+
+    def update_totals_in_entries(self):
+        for row in self.df_entries.index:
+            entry_total_referencia = self.root.grid_slaves(row=row + 1, column=self.columns.index('total_referencia'))[0]
+            entry_total_referencia.delete(0, tk.END)
+            entry_total_referencia.insert(0, self.df_entries.at[row, 'total_referencia'])
+
+            entry_vl_total_referencia = self.root.grid_slaves(row=row + 1, column=self.columns.index('vl_total_referencia'))[0]
+            entry_vl_total_referencia.delete(0, tk.END)
+            entry_vl_total_referencia.insert(0, self.df_entries.at[row, 'vl_total_referencia'])
+
+
+def atualizar_labels():
+    global total_pares
+    global vl_total_pedido
+    global condicoes_pagamento
+    total_pares = pedido_form.df_entries['total_referencia'].sum()
+    vl_total_pedido = pedido_form.df_entries['vl_total_referencia'].sum()
+    label_total_pares.config(text=f'Total de pares: {total_pares}')
+    label_total_pedido.config(text=f'Total R$: {vl_total_pedido}')
+
+    if total_pares > 100:
+        condicoes_pagamento += ['20/40/60 DD', '30/60 DD']
+        combobox_pagamento['values'] = condicoes_pagamento
+
+
+def obter_num_pedido(pedido):
+    #  se já existir algum pedido salvo, retorna o próximo número, se não tiver, inicia com o número 1
+    resultado = db_connection.session.query(getattr(pedido.columns, 'num_pedido')).order_by(pedido.columns.num_pedido.desc()).first()
+    return int(resultado.num_pedido) + 1 if resultado else 1
+
+
+def confirmar_finalizacao():
+    resposta = messagebox.askyesno("Confirmação", "Tem certeza que deseja finalizar o pedido?")
+    if resposta:
+        finalizar_pedido()
+
+
+def finalizar_pedido():
+    #  Remapear os nomes das colunas do dataframe para ficarem iguais as do banco de dados
+    map_colunas = {'referencia': 'referencia', 'cor': 'cor', '33': 'qtd_33', '34': 'qtd_34', '35': 'qtd_35',
+                   '36': 'qtd_36', '37': 'qtd_37', '38': 'qtd_38', '39': 'qtd_39', '40': 'qtd_40', 'preco': 'preco',
+                   'total_referencia': 'total_referencia', 'vl_total_referencia': 'vl_total_referencia',
+                   'total_pares': 'total_pares', 'vl_total_pedido': 'vl_total_pedido'}
+    pedido_form.df_entries.rename(columns=map_colunas, inplace=True)
+
+    #  Acrescentar os campos num_pedido, data_pedido, cpf/cnpj, pagamento, total_pares e vl_total_pedido no dataframe
+    pedido_form.df_entries['cpf_cnpj'] = cliente_form.entry_cpf.get()
+    pedido_form.df_entries['num_pedido'] = obter_num_pedido(pedido_form.Pedido)
+    pedido_form.df_entries['data_pedido'] = data_pedido
+    pedido_form.df_entries['pagamento'] = combobox_pagamento.get()
+    pedido_form.df_entries['total_pares'] = pedido_form.df_entries['total_referencia'].sum()
+    pedido_form.df_entries['vl_total_pedido'] = pedido_form.df_entries['vl_total_referencia'].sum()
+
+    #  Salvar o dataframe no banco de dados 'ft_pedido'
+    pedido_form.df_entries.to_sql('ft_pedido', db_connection.engine, if_exists='append', index=False)
+    messagebox.showinfo('Sucesso!', "Pedido finalizado e salvo com sucesso!")
+
+    # Enviar email com o pedido
+    enviar_email_pedido(pedido_form.df_entries, cliente_form.entry_email.get(), 'meuemail@gmail.com')
+
+
+def enviar_email_pedido(df, email_cliente, email_oculto):
+    # Selecionar apenas as colunas desejadas
+    colunas_desejadas = ['referencia', 'cor', 'qtd_33', 'qtd_34', 'qtd_35', 'qtd_36', 'qtd_37', 'qtd_38', 'qtd_39',
+                         'qtd_40', 'total_referencia', 'preco', 'vl_total_referencia']
+    df_selecionado = df[colunas_desejadas]
+
+    # Converter o DataFrame em uma tabela HTML formatada
+    pedido_html = build_table(df_selecionado, 'blue_light')
+
+    # Criar a mensagem de email
+    msg = MIMEMultipart()
+    msg['From'] = 'meuemail@gmail.com'
+    msg['To'] = email_cliente
+    # Certifique-se de que o valor do número do pedido é uma string simples
+    num_pedido = str(df['num_pedido'].iloc[-1])
+    msg['Subject'] = f'Resumo do Pedido {num_pedido}'
+
+    # Adicionar o corpo do email
+    corpo_email = f"""
+        <html>
+        <body>
+        <p>Prezado cliente (CPF/NPJ: {df['cpf_cnpj'].iloc[0]}),</p>
+        <p>Segue abaixo o resumo do seu pedido:</p>
+        {pedido_html}
+        <p>Total de pares: {df['total_pares'].iloc[0]}</p>
+        <p>Valor total do Pedido: R$ {df['vl_total_pedido'].iloc[0]}</p>
+        <p>Forma de pagamento: {df['pagamento'].iloc[0]}</p>
+        <p>Obrigado por comprar conosco!</p>
+        </body>
+        </html>
+        """
+    msg.attach(MIMEText(corpo_email, 'html'))
+
+    # Lista de destinatários
+    to_addrs = [email_cliente, email_oculto]
+
+    # Enviar o email
+    with smtplib.SMTP('smtp.gmail.com', 587) as server:
+        server.starttls()
+        server.login('meuemail@gmail.com', 'senhadeappdogoogle')
+        server.sendmail(msg['From'], to_addrs, msg.as_string())
+
+    messagebox.showinfo('Sucesso!', "Email enviado com sucesso!")
+
+
+# Obter a data do pedido do sistema
+data_pedido = date.today().strftime('%d/%m/%y')
+
+# Cria a janela principal
+root = tk.Tk()
+root.title("Formulário de Pedido de Compra de Calçados")
+
+root.grid_rowconfigure(0, weight=1)
+root.grid_rowconfigure(1, weight=2)
+root.grid_rowconfigure(2, weight=2)
+root.grid_rowconfigure(3, weight=1)
+root.grid_columnconfigure(0, weight=1)
+
+# Cria os frames para organizar os módulos
+head_frame = tk.Frame(root)
+head_frame.grid(row=0, column=0, sticky="nsew")
+
+top_frame = tk.Frame(root)
+top_frame.grid(row=1, column=0, sticky="nsew")
+
+mid_frame = tk.Frame(root)
+mid_frame.grid(row=2, column=0, sticky="nsew")
+
+bot_frame = tk.Frame(root)
+bot_frame.grid(row=3, column=0, sticky="nsew")
+
+# Configurar o peso das colunas do head_frame
+head_frame.columnconfigure(0, weight=1)
+head_frame.columnconfigure(1, weight=1)
+head_frame.columnconfigure(2, weight=1)
+
+if __name__ == "__main__":
+    database_url = "postgresql+psycopg2://postgres:senha@localhost:5432/esperanza"
+    db_connection = DatabaseConnection(database_url)
+
+    cliente_form = ClienteForm(top_frame, db_connection)
+    pedido_form = PedidoForm(mid_frame, db_connection)
+
+    # O head_frame mostra os dados do vendedor e a data e número do pedido
+    tk.Label(head_frame, text='Nome MEI').grid(row=0, column=0, sticky='w')
+    tk.Label(head_frame, text='CNPJ: 00000000/0000-00').grid(row=1, column=0, sticky='w')
+    tk.Label(head_frame, text=f'Pedido: {obter_num_pedido(pedido_form.Pedido)}').grid(row=0, column=2, sticky='e')
+    tk.Label(head_frame, text=f'Data do pedido: {data_pedido}').grid(row=1, column=2, sticky='e')
+
+    # O bot_frame mostra as opções de pagamento, os totais e o botão para finalizar o pedido
+    total_pares = pedido_form.df_entries['total_referencia'].sum()
+    vl_total_pedido = pedido_form.df_entries['vl_total_referencia'].sum()
+
+    label_total_pares = tk.Label(bot_frame, text=f'Total de pares: {total_pares}')
+    label_total_pares.grid(row=0, column=0, sticky="nsew")
+    label_total_pedido = tk.Label(bot_frame, text=f'Total R$: {vl_total_pedido}')
+    label_total_pedido.grid(row=1, column=0, sticky="nsew")
+
+    tk.Label(bot_frame, text='Condições de pagamento:').grid(row=0, column=1, sticky="nsew")
+    condicoes_pagamento = ['à vista com 7%', '20/40 DD', '30 DD']
+    combobox_pagamento = ttk.Combobox(bot_frame, values=condicoes_pagamento, width=15)
+    combobox_pagamento.grid(row=1, column=1, sticky="nsew")
+
+    botao_finalizar = tk.Button(bot_frame, text="Finalizar Pedido", command=confirmar_finalizacao)
+    botao_finalizar.grid(row=2)
+
+    root.mainloop()
